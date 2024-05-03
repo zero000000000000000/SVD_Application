@@ -107,14 +107,22 @@ def plot_info_curve(S,img_type):
             plt.title('部分奇异值和解释率变化图')
             plt.savefig('./Pic/{0}/info_curve_{1}.jpg'.format(img_type,i+1))
     
-def get_k_list(image_array):
+def get_k_list(S):
     '''
     Get sv number k list
     '''
-    max_sv_num = np.min(image_array.shape[:2])
-    knum = (max_sv_num//100)*10
+    if type(S) == list:
+        Sp = S[0]
+    else:
+        Sp = S
+    
+    S_rate = np.cumsum(Sp/np.sum(Sp))
+    k_max = S_rate[S_rate<0.95].size
+    print(k_max)
+    knum = k_max//10
+
     k_list = [1]
-    k_list.extend(np.arange(knum,max_sv_num,knum).tolist())
+    k_list.extend(np.arange(knum,k_max,knum).tolist())
     return k_list
 
 def normalize_image(image_array):
@@ -282,12 +290,12 @@ if __name__ == '__main__':
     img_type = check_img_type(image_array)
 
     # 绘制奇异值和解释率变动曲线
-    # S = svd_full(image_array,img_type)
+    S = svd_full(image_array,img_type)
     # plot_sv_curve(S,img_type)
     # plot_info_curve(S,img_type)
 
     # 以50为间隔，设置K值
-    k_list = get_k_list(image_array)
+    k_list = get_k_list(S)
 
     if img_type == 'Grey':
         n_image, cr_list, ssim_list, ncc_list = svd_compress_grey(image_array,k_list)
