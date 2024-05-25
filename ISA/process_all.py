@@ -7,6 +7,7 @@ from tqdm import tqdm
 from sklearn.mixture import GaussianMixture
 import pandas as pd
 from scipy.optimize import linear_sum_assignment
+from sklearn.decomposition import PCA
 
 plt.rcParams['font.sans-serif']=['SimHei']
 plt.rcParams['axes.unicode_minus'] = False
@@ -37,12 +38,42 @@ def plot_total_change(s1,inp):
     else:
         plt.savefig('./Pic/docs_wc/Svd_total_plot.png')
 
+
+def pca(X,k):
+    st = time.time()
+    pca = PCA(n_components=k)
+    X_pca = pca.fit_transform(X.T)
+    et = time.time()
+    info = np.sum(pca.explained_variance_ratio_)
+    return [X_pca,et-st,info]
+
 def latent_space(u,s,vh,k):
     # un = u[:,:k]
+    # st = time.time()
     s = s[:k]
     sn = np.diag(s)
     vhn = vh[:k,:]
-    return np.dot(sn,vhn)
+    res = np.dot(sn,vhn)
+    # et = time.time()
+    return res
+
+def rsvd(A,k,n_iter=5):
+    st = time.time()
+    Omega = np.random.randn(A.shape[1],k)
+    Y = A@Omega
+    for q in range(n_iter):
+        Y = A @ (A.T @ Y)
+    Q,_ = np.linalg.qr(Y)
+
+    B = Q.T @ A
+    u_tilde, s, v = np.linalg.svd(B, full_matrices = 0)
+    u = Q @ u_tilde
+
+    s = np.diag(s)
+    res = np.dot(s,v)
+
+    et = time.time()
+    return [res,et-st]
 
 def transform_x(X):
     column_norms = np.linalg.norm(X, axis=0)
@@ -72,7 +103,7 @@ def clustering_gmm(X):
 
     return labels,t
 
-def plot_cluster(X,labels,inp):
+def plot_cluster(X,labels,inp,method):
     num = X.shape[1]
     tsne = TSNE(n_components=2)
     decomposition_data = tsne.fit_transform(X)
@@ -90,9 +121,9 @@ def plot_cluster(X,labels,inp):
     plt.xticks(())
     plt.yticks(())
     if inp == 'ch':
-        plt.savefig(f'./Pic/ch_wc/cluster_plot_{num}.png')
+        plt.savefig(f'./Pic/ch_wc/cluster_plot_{num}_{method}.png')
     else:
-        plt.savefig(f'./Pic/docs_wc/cluster_plot_{num}.png')
+        plt.savefig(f'./Pic/docs_wc/cluster_plot_{num}_{method}.png')
     # plt.show()
 
 def compute_purity(y_true,label):
@@ -166,16 +197,21 @@ def max_acc(y_true, y_pred):
 
 if __name__ == '__main__':
 
-    inp = 'ch'
+    # inp = 'ch'
+    # dic = {'C000010':0,
+    #     'C000013':1,
+    #     'C000014':2,
+    #     'C000020':3,
+    #     'C000022':4,
+    #     'C000023':5}
+    # svd_t = 6.564
+    inp = 'docs'
+    dic = {'O1':0,'C8':1,'P1':2,'R3':3,'F7':4,'G8':5}
+    svd_t = 0.5437
+    
     path = './Mat/{}'.format(inp)+'_tfidf.npy'
     df = pd.read_csv(f'./Data/{inp}_prepared.csv')
-    dic = {'C000010':0,
-        'C000013':1,
-        'C000014':2,
-        'C000020':3,
-        'C000022':4,
-        'C000023':5}
-    # dic = {'O1':0,'C8':1,'P1':2,'R3':3,'F7':4,'G8':5}
+
     tfidf_vec = np.load(path)
     # st1 = time.time()
     u1, s1, vh1 = np.linalg.svd(tfidf_vec, full_matrices=True)
@@ -188,21 +224,70 @@ if __name__ == '__main__':
     k_list = np.arange(10,310,20)
     # k_list
     ls_list2 = []
+
+    # product_t = []
+
+    # 0.pca
+    pca_t = []
+    ls_list3 = []
+    pca_info_list = []
     for k in k_list:
         ls_list2.append(latent_space(u1,s1,vh1,k))
-
-    kmeans_t = []
-    gmm_t = []
-
-    purity, fl, aril, acc = [],[],[],[]
-    s_list = np.cumsum(s1/np.sum(s1))
-
-    info_list = []
+        pca_result = pca(tfidf_vec,k)
+        ls_list3.append(pca_result[0])
+        pca_t.append(pca_result[1])
+        pca_info_list.append(pca_result[2])
 
     df['type'] = [dic[i] for i in df['class']]
     y_true = df['type'].tolist()
     y_true=np.array(y_true)
 
+
+    # 0.pca+kmeans
+    kmeans_t = []
+    purity, fl, aril, acc = [],[],[],[]
+    for i in tqdm(ls_list3):
+        label,t = clustering_kmeans(i)
+        kmeans_t.append(t)
+        purity.append(compute_purity(y_true,label))
+        f,ari = compute_f_measure_new(y_true,label)
+        fl.append(f)
+        aril.append(ari)
+
+    df_pca_kmeans = pd.DataFrame({'k':k_list,
+                           'pca_info_list':pca_info_list,
+                           'pca_t':pca_t,
+                           'kmeans_t':kmeans_t,
+                           'purity':purity,
+                           'f_list':fl,
+                           'ari_list':aril})
+    df_pca_kmeans.to_csv(f'./Metrics_new/{inp}_pca_kmeans.csv',index=False)
+
+    # 0.pca+gmm
+    gmm_t = []
+    purity, fl, aril, acc = [],[],[],[]
+    for i in tqdm(ls_list3):
+        label,t = clustering_gmm(i)
+        gmm_t.append(t)
+        purity.append(compute_purity(y_true,label))
+        f,ari = compute_f_measure_new(y_true,label)
+        fl.append(f)
+        aril.append(ari)
+
+    df_pca_gmm = pd.DataFrame({'k':k_list,
+                           'pca_info_list':pca_info_list,
+                           'pca_t':pca_t,
+                           'gmm_t':gmm_t,
+                           'purity':purity,
+                           'f_list':fl,
+                           'ari_list':aril})
+    df_pca_gmm.to_csv(f'./Metrics_new/{inp}_pca_gmm.csv',index=False)
+
+    # 1. svd+kmeans
+    kmeans_t = []
+    purity, fl, aril, acc = [],[],[],[]
+    s_list = np.cumsum(s1/np.sum(s1))
+    info_list = []
     for i in tqdm(ls_list2):
         i = transform_x(i)
         info_list.append(s_list[i.shape[1]-1])
@@ -213,19 +298,95 @@ if __name__ == '__main__':
         fl.append(f)
         aril.append(ari)
         # acc.append(max_acc(y_true,label))
-    
-    new_df = pd.DataFrame({'k':k_list,
+
+    df_svd_kmeans = pd.DataFrame({'k':k_list,
                            'info_list':info_list,
-                           't':kmeans_t,
+                           'svd_t':[svd_t]*len(k_list),
+                           'kmeans_t':kmeans_t,
                            'purity':purity,
                            'f_list':fl,
                            'ari_list':aril})
-
-    new_df.to_csv(f'./Metrics/{inp}.csv',index=False)
+    df_svd_kmeans.to_csv(f'./Metrics_new/{inp}_svd_kmeans.csv',index=False)
     
-    max_ind = [1,5]
-    #max_ind = [4,11]
-    for i in max_ind:
-        X = transform_x(ls_list2[i])
-        label,t = clustering_kmeans(X)
-        plot_cluster(X,label,inp)
+
+    # 2. svd+gmm
+    gmm_t = []
+    purity, fl, aril, acc = [],[],[],[]
+    for i in tqdm(ls_list2):
+        i = transform_x(i)
+        label,t = clustering_gmm(i)
+        gmm_t.append(t)
+        purity.append(compute_purity(y_true,label))
+        f,ari = compute_f_measure_new(y_true,label)
+        fl.append(f)
+        aril.append(ari)
+        # acc.append(max_acc(y_true,label))
+    
+    df_svd_gmm = pd.DataFrame({'k':k_list,
+                           'info_list':info_list,
+                           'svd_t':[svd_t]*len(k_list),
+                           'gmm_t':gmm_t,
+                           'purity':purity,
+                           'f_list':fl,
+                           'ari_list':aril})
+    df_svd_gmm.to_csv(f'./Metrics_new/{inp}_svd_gmm.csv',index=False)
+
+
+    # 3. rsvd+kmeans
+    kmeans_t = []
+    purity, fl, aril, acc = [],[],[],[]
+    ls_list4 = []
+    rsvd_t = []
+    # s_list = np.cumsum(s1/np.sum(s1))
+    for k in k_list:
+        rsvd_result = rsvd(tfidf_vec,k)
+        ls_list4.append(rsvd_result[0])
+        rsvd_t.append(rsvd_result[1])
+
+    for i in tqdm(ls_list4):
+        i = transform_x(i)
+        label,t = clustering_kmeans(i)
+        kmeans_t.append(t)
+        purity.append(compute_purity(y_true,label))
+        f,ari = compute_f_measure_new(y_true,label)
+        fl.append(f)
+        aril.append(ari)
+        # acc.append(max_acc(y_true,label))
+
+    df_rsvd_kmeans = pd.DataFrame({'k':k_list,
+                           'info_list':info_list,
+                           'rsvd_t':rsvd_t,
+                           'kmeans_t':kmeans_t,
+                           'purity':purity,
+                           'f_list':fl,
+                           'ari_list':aril})
+    df_rsvd_kmeans.to_csv(f'./Metrics_new/{inp}_rsvd_kmeans.csv',index=False)
+
+    #3. rsvd+gmm
+    gmm_t = []
+    purity, fl, aril, acc = [],[],[],[]
+    for i in tqdm(ls_list4):
+        i = transform_x(i)
+        label,t = clustering_gmm(i)
+        gmm_t.append(t)
+        purity.append(compute_purity(y_true,label))
+        f,ari = compute_f_measure_new(y_true,label)
+        fl.append(f)
+        aril.append(ari)
+        # acc.append(max_acc(y_true,label))
+    
+    df_rsvd_gmm = pd.DataFrame({'k':k_list,
+                           'info_list':info_list,
+                           'rsvd_t':rsvd_t,
+                           'gmm_t':gmm_t,
+                           'purity':purity,
+                           'f_list':fl,
+                           'ari_list':aril})
+    df_rsvd_gmm.to_csv(f'./Metrics_new/{inp}_rsvd_gmm.csv',index=False)
+
+    # max_ind = [1,5]
+    # #max_ind = [4,11]
+    # for i in max_ind:
+    #     X = transform_x(ls_list2[i])
+    #     label,t = clustering_kmeans(X)
+    #     plot_cluster(X,label,inp)
