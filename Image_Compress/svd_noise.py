@@ -129,7 +129,7 @@ def get_k_list(S):
         Sp = S
     
     S_rate = np.cumsum(Sp/np.sum(Sp))
-    k_max = S_rate[S_rate<=0.8].size
+    k_max = S_rate[S_rate<0.95].size
     print(k_max)
     knum = k_max//10
 
@@ -207,6 +207,17 @@ def svd_compress_grey(image_array,k_list,raw_image_array):
     
     return n_image, cr_list, ssim_list, ncc_list
 
+def compute_psnr(raw_image_array,normalized_image):
+    mse = np.mean((raw_image_array - normalized_image) ** 2)
+    
+    # 避免除以0的情况
+    if mse == 0:
+        return float('inf')
+    
+    # 计算PSNR
+    psnr_value = 20 * log(255 / np.sqrt(mse))
+
+    return psnr_value
                        
 def plot_pics_grey(image_array,n_image,k_list,path):
     '''
@@ -247,7 +258,7 @@ def plot_metrics(df,path):
 
 if __name__ == '__main__':
 
-    noise_type = 'gaussian'
+    noise_type = 'uniform'
 
     img = Image.open(f'./Noise_Process/noise_{noise_type}.png','r')
     image_array = np.array(img)
@@ -258,8 +269,8 @@ if __name__ == '__main__':
 
     # 绘制奇异值和解释率变动曲线
     S = svd_full(image_array,img_type)
-    # plot_sv_curve(S,noise_type)
-    # plot_info_curve(S,noise_type)
+    plot_sv_curve(S,noise_type)
+    plot_info_curve(S,noise_type)
 
     k_list = get_k_list(S)
 
@@ -278,6 +289,6 @@ if __name__ == '__main__':
 
     # plot_metrics(df,noise_type)
 
-    for k, compressed_image in zip(k_list, n_image):
-        compressed_image = Image.fromarray(compressed_image)
-        compressed_image.save(f"./Noise_Process/{noise_type}_image_{k}.jpg")
+    # for k, compressed_image in zip(k_list, n_image):
+    #     compressed_image = Image.fromarray(compressed_image)
+    #     compressed_image.save(f"./Noise_Process/{noise_type}_image_{k}.jpg")
